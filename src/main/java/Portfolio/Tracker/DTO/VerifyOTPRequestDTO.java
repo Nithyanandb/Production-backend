@@ -7,13 +7,9 @@ import lombok.NoArgsConstructor;
 
 @Data
 @Builder
-@AllArgsConstructor
 @NoArgsConstructor
-public class AuthResponseDTO {
-    private String token;
+@AllArgsConstructor
+public class VerifyOTPRequestDTO {
     private String email;
-    private String name;
-    private String message;
-    private boolean requiresOTP;
-
+    private String otp;
 }

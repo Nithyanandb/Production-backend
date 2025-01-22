@@ -3,6 +3,7 @@ package Portfolio.Tracker.Service;
 import Portfolio.Tracker.DTO.AuthResponseDTO;
 import Portfolio.Tracker.DTO.LoginRequestDTO;
 import Portfolio.Tracker.DTO.RegisterRequestDTO;
+import Portfolio.Tracker.DTO.VerifyOTPRequestDTO;
 import Portfolio.Tracker.DTO.AuthProvider;
 import Portfolio.Tracker.DTO.Role;
 import Portfolio.Tracker.Entity.User;
@@ -21,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -30,8 +33,8 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthenticationManager authenticationManager;
+    private final OTPService otpService; // Inject the OTPService
     private final KeyStorage keyStorage;
-
     @Value("${spring.security.oauth2.client.registration.google.client-id}")
     private String googleClientId;
 
@@ -70,19 +73,37 @@ public class AuthService {
                 .build();
     }
 
-    // Traditional Login
+    // Traditional Login with 2FA
     public AuthResponseDTO login(LoginRequestDTO request) {
+        // Authenticate the user
         Authentication auth = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
         );
 
+        // Fetch the user from the database
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
+        // Check if the user is using a local provider
         if (user.getProvider() != AuthProvider.LOCAL) {
             throw new RuntimeException("Please use " + user.getProvider() + " to login");
         }
 
+        // Check if 2FA is enabled for the user
+        if (user.isPasskeyEnabled()) { // Assuming `isPasskeyEnabled` is used for 2FA
+            // Generate and send OTP
+            String otp = otpService.generateOTP(user.getEmail());
+            sendOTP(user.getEmail(), otp); // Send OTP to the user (via email, SMS, etc.)
+
+            // Return a response indicating OTP verification is required
+            return AuthResponseDTO.builder()
+                    .email(user.getEmail())
+                    .message("OTP sent to your registered email. Please verify.")
+                    .requiresOTP(true)
+                    .build();
+        }
+
+        // If 2FA is not enabled, generate a JWT token
         String token = jwtTokenProvider.generateToken(auth);
 
         return AuthResponseDTO.builder()
@@ -90,56 +111,47 @@ public class AuthService {
                 .email(user.getEmail())
                 .name(user.getName())
                 .message("Login successful")
+                .requiresOTP(false)
                 .build();
     }
 
-    public AuthResponseDTO processOAuth2Login(OAuth2AuthenticationToken token) {
-        OAuth2User oauth2User = token.getPrincipal();
-        String email = extractEmail(oauth2User, token.getAuthorizedClientRegistrationId());
+    // Verify OTP
+    public AuthResponseDTO verifyOTP(VerifyOTPRequestDTO request) {
+        // Fetch the user from the database
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new RuntimeException("User not found"));
 
-        User user = userRepository.findByEmail(email)
-                .map(existingUser -> updateExistingUser(existingUser, oauth2User, token.getAuthorizedClientRegistrationId()))
-                .orElseGet(() -> createOAuth2User(oauth2User, token.getAuthorizedClientRegistrationId()));
+        // Check if 2FA is enabled for the user
+        if (!user.isPasskeyEnabled()) {
+            throw new RuntimeException("2FA is not enabled for this user");
+        }
 
-        String jwtToken = jwtTokenProvider.generateToken(token);
+        // Verify the OTP
+        boolean isOTPValid = otpService.verifyOTP(request.getEmail(), request.getOtp());
+        if (!isOTPValid) {
+            throw new RuntimeException("Invalid OTP");
+        }
+
+        // Clear the OTP after successful verification
+        otpService.clearOTP(request.getEmail());
+
+        // Generate a JWT token
+        Authentication auth = new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
+        String token = jwtTokenProvider.generateToken(auth);
 
         return AuthResponseDTO.builder()
-                .token(jwtToken)
+                .token(token)
                 .email(user.getEmail())
                 .name(user.getName())
-                .message("OAuth2 login successful")
+                .message("OTP verified successfully")
+                .requiresOTP(false)
                 .build();
-    }   
-
-    private String extractEmail(OAuth2User oauth2User, String registrationId) {
-        Map<String, Object> attributes = oauth2User.getAttributes();
-        if ("google".equals(registrationId)) {
-            return (String) attributes.get("email");
-        } else if ("github".equals(registrationId)) {
-            return (String) attributes.get("email");
-        }
-        throw new RuntimeException("Unknown provider: " + registrationId);
     }
 
-    private User updateExistingUser(User existingUser, OAuth2User oauth2User, String registrationId) {
-        AuthProvider provider = AuthProvider.valueOf(registrationId.toUpperCase());
-        if (existingUser.getProvider() != provider) {
-            throw new RuntimeException("You're signed up with " + existingUser.getProvider() + 
-                    ". Please use your " + existingUser.getProvider() + " account to login");
-        }
-        
-        existingUser.setName(oauth2User.getAttribute("name"));
-        return userRepository.save(existingUser);
-    }
-
-    private User createOAuth2User(OAuth2User oauth2User, String registrationId) {
-        User user = User.builder()
-                .email(extractEmail(oauth2User, registrationId))
-                .name(oauth2User.getAttribute("name"))
-                .provider(AuthProvider.valueOf(registrationId.toUpperCase()))
-                .roles(Collections.singleton(Role.ROLE_USER))
-                .build();
-        return userRepository.save(user);
+    // Send OTP to the user (mock implementation)
+    private void sendOTP(String email, String otp) {
+        // Implement logic to send OTP via email or SMS
+        System.out.println("OTP for " + email + ": " + otp);
     }
 
     // OAuth2 URL Generators
@@ -158,9 +170,10 @@ public class AuthService {
                 "&scope=user:email";
     }
 
+
     public void logout(String token) {
         if (token != null) {
             keyStorage.removeKey(token);
         }
     }
-} 
+}

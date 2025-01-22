@@ -45,6 +45,7 @@ public class User implements UserDetails {
     @Column(name = "is_passkey_enabled")
     private boolean isPasskeyEnabled; // New column for Passkey status
 
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return roles.stream()

@@ -4,6 +4,7 @@ import Portfolio.Tracker.DTO.AuthResponseDTO;
 import Portfolio.Tracker.DTO.LoginRequestDTO;
 import Portfolio.Tracker.DTO.LogoutResponse;
 import Portfolio.Tracker.DTO.RegisterRequestDTO;
+import Portfolio.Tracker.DTO.VerifyOTPRequestDTO;
 import Portfolio.Tracker.Service.AuthService;
 import Portfolio.Tracker.Service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -11,11 +12,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 @RestController
 @RequestMapping("/auth")
 @RequiredArgsConstructor
 public class AuthController {
-    
     private final AuthService authService;
     private final UserService userService;
 
@@ -29,6 +30,11 @@ public class AuthController {
         return ResponseEntity.ok(authService.login(request));
     }
 
+    @PostMapping("/verify-otp")
+    public ResponseEntity<AuthResponseDTO> verifyOTP(@RequestBody VerifyOTPRequestDTO request) {
+        return ResponseEntity.ok(authService.verifyOTP(request));
+    }
+
     @GetMapping("/oauth2/google")
     public ResponseEntity<String> getGoogleAuthUrl() {
         return ResponseEntity.ok(authService.getGoogleAuthUrl());
@@ -38,7 +44,6 @@ public class AuthController {
     public ResponseEntity<String> getGithubAuthUrl() {
         return ResponseEntity.ok(authService.getGithubAuthUrl());
     }
-
 
     @PostMapping("/logout")
     public ResponseEntity<LogoutResponse> logout(
@@ -63,7 +68,4 @@ public class AuthController {
         }
         return null;
     }
-
-
-
 }

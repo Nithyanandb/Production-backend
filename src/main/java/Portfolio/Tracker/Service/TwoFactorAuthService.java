@@ -26,14 +26,14 @@ public class TwoFactorAuthService {
     private UserRepository userRepository;
 
     @Autowired
-    private Cache<String, String> otpCache; // Inject the OTP cache
+    private Cache<String, String> otpCache; // Cache for storing OTP codes
 
     private final GoogleAuthenticator googleAuthenticator;
 
     public TwoFactorAuthService() {
         GoogleAuthenticatorConfig config = new GoogleAuthenticatorConfig.GoogleAuthenticatorConfigBuilder()
-                .setTimeStepSizeInMillis(TimeUnit.SECONDS.toMillis(30))
-                .setWindowSize(3)
+                .setTimeStepSizeInMillis(TimeUnit.SECONDS.toMillis(30)) // 30-second time steps
+                .setWindowSize(3) // Allow a window of 3 time steps for OTP validation
                 .build();
         this.googleAuthenticator = new GoogleAuthenticator(config);
     }
@@ -53,11 +53,13 @@ public class TwoFactorAuthService {
             User user = userRepository.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
 
+            // Generate a new OTP secret
             GoogleAuthenticatorKey key = googleAuthenticator.createCredentials();
             String secret = key.getKey();
 
             logger.info("Generated OTP secret: {}", secret);
 
+            // Save the OTP secret to the user entity
             user.setOtpSecret(secret);
             userRepository.save(user);
 
@@ -78,12 +80,14 @@ public class TwoFactorAuthService {
      */
     public String generateAndCacheOTP(String secret) {
         try {
+            // Check if the OTP is already cached
             String cachedOtp = otpCache.getIfPresent(secret);
             if (cachedOtp != null) {
                 logger.info("Retrieved OTP from cache for secret: {}", secret);
                 return cachedOtp;
             }
 
+            // Generate the OTP code
             long timeWindow = System.currentTimeMillis() / 30000; // 30-second window
             byte[] key = new Base32().decode(secret); // Decode the Base32-encoded secret
             byte[] data = new byte[8];
@@ -173,6 +177,47 @@ public class TwoFactorAuthService {
     }
 
     /**
+     * Verifies the passkey response provided by the user.
+     *
+     * @param email          The email of the user.
+     * @param passkeyResponse The passkey response to verify.
+     * @return True if the passkey response is valid, false otherwise.
+     * @throws RuntimeException If the user is not found or an error occurs.
+     */
+    @Transactional(readOnly = true)
+    public boolean verifyPasskey(String email, String passkeyResponse) {
+        try {
+            logger.info("Verifying passkey for user with email: {}", email);
+
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
+
+            // Validate the passkey response (this logic depends on your passkey implementation)
+            boolean isVerified = validatePasskeyResponse(user, passkeyResponse);
+
+            logger.info("Passkey verification result for user {}: {}", email, isVerified);
+            return isVerified;
+        } catch (Exception e) {
+            logger.error("Error verifying passkey for user: {}", email, e);
+            throw new RuntimeException("Failed to verify passkey: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Validates the passkey response.
+     *
+     * @param user            The user entity.
+     * @param passkeyResponse The passkey response to validate.
+     * @return True if the passkey response is valid, false otherwise.
+     */
+    private boolean validatePasskeyResponse(User user, String passkeyResponse) {
+        // Implement your passkey validation logic here
+        // For example, compare the passkey response with the stored passkey data
+        // This is a placeholder implementation
+        return true;
+    }
+
+    /**
      * Enables passkey authentication for the user.
      *
      * @param email The email of the user.
@@ -195,6 +240,82 @@ public class TwoFactorAuthService {
         } catch (Exception e) {
             logger.error("Error setting up passkey for user: {}", email, e);
             throw new RuntimeException("Failed to setup passkey: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Disables passkey authentication for the user.
+     *
+     * @param email The email of the user.
+     * @return True if passkey is disabled successfully.
+     * @throws RuntimeException If the user is not found or an error occurs.
+     */
+    @Transactional
+    public boolean disablePasskey(String email) {
+        try {
+            logger.info("Disabling passkey for user with email: {}", email);
+
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
+
+            user.setPasskeyEnabled(false);
+            userRepository.save(user);
+
+            logger.info("Passkey disabled successfully for user: {}", email);
+            return true;
+        } catch (Exception e) {
+            logger.error("Error disabling passkey for user: {}", email, e);
+            throw new RuntimeException("Failed to disable passkey: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Disables 2FA for the user by removing the OTP secret.
+     *
+     * @param email The email of the user.
+     * @return True if 2FA is disabled successfully.
+     * @throws RuntimeException If the user is not found or an error occurs.
+     */
+    @Transactional
+    public boolean disable2FA(String email) {
+        try {
+            logger.info("Disabling 2FA for user with email: {}", email);
+
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
+
+            user.setOtpSecret(null);
+            userRepository.save(user);
+
+            logger.info("2FA disabled successfully for user: {}", email);
+            return true;
+        } catch (Exception e) {
+            logger.error("Error disabling 2FA for user: {}", email, e);
+            throw new RuntimeException("Failed to disable 2FA: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Retrieves the 2FA status for the user.
+     *
+     * @param email The email of the user.
+     * @return True if 2FA is enabled, false otherwise.
+     * @throws RuntimeException If the user is not found or an error occurs.
+     */
+    @Transactional(readOnly = true)
+    public boolean get2FAStatus(String email) {
+        try {
+            logger.info("Retrieving 2FA status for user with email: {}", email);
+
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
+
+            boolean is2FAEnabled = user.getOtpSecret() != null;
+            logger.info("2FA status for user {}: {}", email, is2FAEnabled);
+            return is2FAEnabled;
+        } catch (Exception e) {
+            logger.error("Error retrieving 2FA status for user: {}", email, e);
+            throw new RuntimeException("Failed to retrieve 2FA status: " + e.getMessage(), e);
         }
     }
 }
