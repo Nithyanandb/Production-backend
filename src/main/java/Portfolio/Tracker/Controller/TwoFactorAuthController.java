@@ -17,6 +17,7 @@ public class TwoFactorAuthController {
     @Autowired
     private TwoFactorAuthService twoFactorAuthService;
     private static final Logger logger = LoggerFactory.getLogger(TwoFactorAuthController.class);
+
     @PostMapping("/generate-otp-secret")
     public ResponseEntity<?> generateOTPSecret(Authentication auth) {
         try {
@@ -29,9 +30,15 @@ public class TwoFactorAuthController {
     }
 
     @PostMapping("/verify-otp")
-    public ResponseEntity<?> verifyOTP(Authentication auth, @RequestParam String otpCode) {
+    public ResponseEntity<?> verifyOTP(Authentication auth, @RequestBody Map<String, String> request) {
         try {
             String email = auth.getName(); // Get the authenticated user's email
+            String otpCode = request.get("otpCode"); // Get the OTP code from the request body
+
+            if (otpCode == null || otpCode.isEmpty()) {
+                throw new IllegalArgumentException("OTP code is required.");
+            }
+
             logger.info("Verifying OTP for user: {}", email);
             logger.info("OTP code provided: {}", otpCode);
 
@@ -68,7 +75,7 @@ public class TwoFactorAuthController {
         try {
             String email = auth.getName(); // Get the authenticated user's email
             boolean isPasskeyEnabled = twoFactorAuthService.setupPasskey(email);
-            return ResponseEntity.ok(isPasskeyEnabled); // Return passkey setup status
+            return ResponseEntity.ok(Map.of("success", isPasskeyEnabled)); // Return passkey setup status
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
         }
