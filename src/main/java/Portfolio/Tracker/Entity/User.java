@@ -28,6 +28,7 @@ public class User implements UserDetails {
 
     @Column(nullable = true)
     private String password;
+
     private String name;
 
     @Enumerated(EnumType.STRING)
@@ -37,6 +38,12 @@ public class User implements UserDetails {
     @ElementCollection(fetch = FetchType.EAGER)
     @Enumerated(EnumType.STRING)
     private Set<Role> roles;
+
+    @Column(name = "otp_secret")
+    private String otpSecret; // New column for OTP secret
+
+    @Column(name = "is_passkey_enabled")
+    private boolean isPasskeyEnabled; // New column for Passkey status
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
